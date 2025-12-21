@@ -195,10 +195,10 @@ function RoomsPage() {
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
-  const [form, setForm] = useState({
-    name: "",
-    is_public: true,
-  });
+  const [form, setForm] = useState({name: "", is_public: true,});
+  const [joinCode, setJoinCode] = useState("");
+  const [joinMessage, setJoinMessage] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchRooms = async () => {
@@ -295,6 +295,50 @@ function RoomsPage() {
       {!loading && !message && rooms.length === 0 && (
         <p className="text-slate-400">You have no rooms yet.</p>
       )}
+      <div className="w-full max-w-xl bg-slate-900 p-4 rounded-xl space-y-3 mb-6">
+        <h2 className="text-lg font-semibold">Join room by invite code</h2>
+        <input
+          type="text"
+          placeholder="Enter invite code (e.g. H1ANHMT0)"
+          className="w-full p-2 rounded bg-slate-800 outline-none"
+          value={joinCode}
+          onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+        />
+        <button
+          onClick={async () => {
+            setJoinMessage("");
+              if (!joinCode) {
+                setJoinMessage("Please enter an invite code.");
+                  return;
+                }
+                try {
+                  const res = await fetch("http://127.0.0.1:8000/api/auth/rooms/join/", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Token ${token}`,
+                    },
+                    body: JSON.stringify({ invite_code: joinCode }),
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        navigate(`/rooms/${data.id}`);
+                    } else if (res.status === 404) {
+                      setJoinMessage("Room not found for that code.");
+                    } else {
+                      setJoinMessage("Failed to join room.");
+                    }
+                  } catch (err) {
+                    setJoinMessage("Server error while joining room.");
+                  }
+                }}
+                className="w-full py-2 rounded bg-indigo-600 hover:bg-indigo-500"
+              >
+                Join room
+              </button>
+              {joinMessage && <p className="text-sm text-slate-400">{joinMessage}</p>}
+            </div>
+
       <div className="mt-4 space-y-2 w-full max-w-xl">
         {rooms.map((room) => (
           <Link
