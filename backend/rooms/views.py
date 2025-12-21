@@ -51,7 +51,7 @@ class RoomViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOwner]
 
     def get_queryset(self):
-        # only my rooms
+        # All actions restricted to owner
         return Room.objects.filter(owner=self.request.user)
 
     def perform_create(self, serializer):
