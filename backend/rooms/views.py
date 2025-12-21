@@ -1,12 +1,14 @@
 from django.shortcuts import render
-
-# Create your views here.
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from .serializers import RegisterSerializer, LoginSerializer
+from rest_framework import viewsets, permissions
+from .models import Room
+from .serializers import RoomSerializer
+import secrets, string
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -35,3 +37,23 @@ def login(request):
             }
         })
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+def generate_invite_code(length=8):
+    alphabet = string.ascii_uppercase + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+class IsOwner(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        return obj.owner == request.user
+
+class RoomViewSet(viewsets.ModelViewSet):
+    serializer_class = RoomSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwner]
+
+    def get_queryset(self):
+        # only my rooms
+        return Room.objects.filter(owner=self.request.user)
+
+    def perform_create(self, serializer):
+        code = generate_invite_code()
+        serializer.save(owner=self.request.user, invite_code=code)
