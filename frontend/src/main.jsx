@@ -4,6 +4,57 @@ import { BrowserRouter, Routes, Route, useNavigate, useParams, Link } from "reac
 import "./index.css";
 import { AuthProvider, useAuth } from "./AuthContext";
 
+function Layout() {
+  const { token, logout } = useAuth();
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-50">
+      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur">
+        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-2">
+            <span className="text-xl font-bold">CoWatch</span>
+          </Link>
+          <nav className="flex items-center gap-4 text-sm">
+            <Link to="/" className="hover:text-indigo-400">Home</Link>
+            {token && (
+              <Link to="/rooms" className="hover:text-indigo-400">
+                My Rooms
+              </Link>
+            )}
+            {!token ? (
+              <>
+                <Link to="/login" className="hover:text-indigo-400">Login</Link>
+                <Link
+                  to="/register"
+                  className="px-3 py-1 rounded bg-indigo-600 hover:bg-indigo-500"
+                >
+                  Sign up
+                </Link>
+              </>
+            ) : (
+              <button
+                onClick={logout}
+                className="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700"
+              >
+                Logout
+              </button>
+            )}
+          </nav>
+        </div>
+      </header>
+
+      <main className="max-w-5xl mx-auto px-4 py-6">
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/rooms" element={<RoomsPage />} />
+          <Route path="/rooms/:id" element={<RoomDetailPage />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
 
 function HomePage() {
   return (
@@ -272,31 +323,30 @@ function RoomDetailPage() {
   const { token } = useAuth();
   const [room, setRoom] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const fetchRoom = async () => {
       if (!token) {
-        setMessage("You must be logged in to view this room.");
+        setError("You must be logged in to view this room.");
         setLoading(false);
         return;
       }
       try {
         const res = await fetch(`http://127.0.0.1:8000/api/auth/rooms/${id}/`, {
-          headers: {
-            Authorization: `Token ${token}`,
-          },
+          headers: { Authorization: `Token ${token}` },
         });
-        const data = await res.json();
         if (res.ok) {
+          const data = await res.json();
           setRoom(data);
           setVideoUrl(data.youtube_url || "");
         } else {
-          setMessage("Room not found or you are not the owner.");
+          setError("Room not found or you are not the owner.");
         }
       } catch (err) {
-        setMessage("Server error while loading room.");
+        setError("Failed to load room.");
       } finally {
         setLoading(false);
       }
@@ -304,9 +354,10 @@ function RoomDetailPage() {
     fetchRoom();
   }, [id, token]);
 
-  const handleSaveVideo = async (e) => {
+  const handleSaveUrl = async (e) => {
     e.preventDefault();
-    setMessage("");
+    if (!token || !room) return;
+    setSaving(true);
     try {
       const res = await fetch(`http://127.0.0.1:8000/api/auth/rooms/${id}/`, {
         method: "PATCH",
@@ -316,73 +367,92 @@ function RoomDetailPage() {
         },
         body: JSON.stringify({ youtube_url: videoUrl }),
       });
-      const data = await res.json();
       if (res.ok) {
-        setRoom(data);
-        setMessage("Video URL saved.");
+        const updatedRoom = await res.json();
+        setRoom(updatedRoom);
+        setError("Video URL saved!");
+        setTimeout(() => setError(""), 2000);
       } else {
-        setMessage("Failed to save video URL.");
+        setError("Failed to save video URL.");
       }
     } catch (err) {
-      setMessage("Server error while saving video URL.");
+      setError("Server error while saving.");
+    } finally {
+      setSaving(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
-        <p>Loading room...</p>
-      </div>
-    );
-  }
+  if (loading) return <div className="text-center p-8">Loading room...</div>;
+  if (error && !room) return <div className="text-center p-8 text-red-400">{error}</div>;
+  if (!room) return <div className="text-center p-8">Room not found.</div>;
 
-  if (message && !room) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
-        <p className="text-red-400">{message}</p>
-      </div>
-    );
-  }
+  // Extract YouTube video ID from URL
+  const getVideoId = (url) => {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    return match && match[2].length === 11 ? match[2] : null;
+  };
+
+  const videoId = room.youtube_url ? getVideoId(room.youtube_url) : null;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center pt-16 px-4">
-      <h1 className="text-3xl font-semibold mb-2">{room.name}</h1>
-      <p className="text-sm text-slate-400 mb-4">
-        Invite code: {room.invite_code}
-      </p>
-      <p className="text-xs text-slate-500 mb-6">
-        Share link: {window.location.href}
-      </p>
+    <div className="max-w-4xl mx-auto p-6 space-y-6">
+      <div className="bg-slate-900 p-6 rounded-xl">
+        <h1 className="text-3xl font-bold mb-2">{room.name}</h1>
+        <p className="text-slate-400 mb-4">Invite code: <span className="font-mono bg-slate-800 px-2 py-1 rounded">{room.invite_code}</span></p>
+        <p className="text-sm text-slate-500">
+          Share link: <span className="font-mono break-all">{window.location.href}</span>
+        </p>
+      </div>
 
-      {message && <p className="text-sm text-emerald-400 mb-4">{message}</p>}
-
-      <form
-        onSubmit={handleSaveVideo}
-        className="w-full max-w-xl bg-slate-900 p-4 rounded-xl space-y-3 mb-6"
-      >
-        <label className="text-sm text-slate-300">
-          YouTube URL for this room
-        </label>
+      <form onSubmit={handleSaveUrl} className="bg-slate-900 p-6 rounded-xl space-y-4">
+        <h2 className="text-xl font-semibold">Set YouTube Video</h2>
         <input
           type="url"
-          placeholder="https://www.youtube.com/watch?v=..."
-          className="w-full p-2 rounded bg-slate-800 outline-none"
+          placeholder="Paste YouTube URL here..."
+          className="w-full p-3 rounded-lg bg-slate-800 border border-slate-700 focus:border-indigo-500 outline-none"
           value={videoUrl}
           onChange={(e) => setVideoUrl(e.target.value)}
         />
         <button
           type="submit"
-          className="w-full py-2 rounded bg-indigo-600 hover:bg-indigo-500"
+          disabled={saving || !videoUrl}
+          className="w-full py-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 font-medium"
         >
-          Save video URL
+          {saving ? "Saving..." : "Save Video URL"}
         </button>
+        {error && !saving && <p className={`p-3 rounded-lg ${error.includes("saved") ? "bg-green-900/50" : "bg-red-900/50"}`}>{error}</p>}
       </form>
 
-      <div className="w-full max-w-3xl bg-slate-900 rounded-xl p-4 min-h-[300px] flex items-center justify-center text-slate-400">
-        {room.youtube_url ? (
-          <p>Video player placeholder for: {room.youtube_url}</p>
-        ) : (
-          <p>No video set yet. Paste a YouTube URL above.</p>
+      <div className="bg-slate-900 rounded-xl overflow-hidden">
+        {videoId ? (
+          <>
+            <iframe
+              src={`https://www.youtube.com/embed/${videoId}?autoplay=0`}
+              title="YouTube video player"
+              frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              referrerPolicy="strict-origin-when-cross-origin"
+              allowFullScreen
+              className="w-full h-96 md:h-[500px] object-cover"
+            />
+            <div className="px-6 pb-6 pt-3 text-sm text-slate-400">
+              Playback is local for now; sync will come later.
+            </div>
+          </>
+      ) : (
+          <div className="h-96 md:h-[500px] bg-slate-800 flex items-center justify-center">
+            <div className="text-center text-slate-400">
+              <div className="w-24 h-24 border-4 border-dashed border-slate-600 rounded-full mx-auto mb-4 flex items-center justify-center">
+                <svg className="w-12 h-12 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.665z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <p className="text-lg">No video selected</p>
+              <p className="text-sm">Paste a YouTube URL above and click Save</p>
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -393,13 +463,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/rooms" element={<RoomsPage />} />
-          <Route path="/rooms/:id" element={<RoomDetailPage />} />
-        </Routes>
+        <Layout />
       </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>
