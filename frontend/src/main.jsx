@@ -365,14 +365,19 @@ function RoomsPage() {
 function RoomDetailPage() {
   const { id } = useParams();
   const { token } = useAuth();
+
   const [room, setRoom] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [saving, setSaving] = useState(false);
+
   const [wsStatus, setWsStatus] = useState("disconnected");
   const socketRef = useRef(null);
+  const playerRef = useRef(null);
+  const [playerReady, setPlayerReady] = useState(false);
 
+  // Fetch room data
   useEffect(() => {
     const fetchRoom = async () => {
       if (!token) {
@@ -381,9 +386,12 @@ function RoomDetailPage() {
         return;
       }
       try {
-        const res = await fetch(`http://127.0.0.1:8000/api/auth/rooms/${id}/`, {
-          headers: { Authorization: `Token ${token}` },
-        });
+        const res = await fetch(
+          `http://127.0.0.1:8000/api/auth/rooms/${id}/`,
+          {
+            headers: { Authorization: `Token ${token}` },
+          }
+        );
         if (res.ok) {
           const data = await res.json();
           setRoom(data);
@@ -400,7 +408,18 @@ function RoomDetailPage() {
     fetchRoom();
   }, [id, token]);
 
-    useEffect(() => {
+  // Helper: extract YouTube ID
+  const getVideoId = (url) => {
+    const regExp =
+      /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    return match && match[2].length === 11 ? match[2] : null;
+  };
+
+  const videoId = room && room.youtube_url ? getVideoId(room.youtube_url) : null;
+
+  // WebSocket setup
+  useEffect(() => {
     if (!id) return;
 
     const wsUrl = `ws://${window.location.hostname}:8000/ws/rooms/${id}/`;
@@ -417,6 +436,17 @@ function RoomDetailPage() {
       try {
         const data = JSON.parse(event.data);
         console.log("WS message:", data);
+
+        if (data.type === "playback" && playerRef.current && playerReady) {
+          if (data.action === "PLAY") {
+            playerRef.current.playVideo();
+          } else if (data.action === "PAUSE") {
+            playerRef.current.pauseVideo();
+          } else if (data.action === "SEEK") {
+            const t = typeof data.time === "number" ? data.time : 0;
+            playerRef.current.seekTo(t, true);
+          }
+        }
       } catch (e) {
         console.log("WS raw message:", event.data);
       }
@@ -436,21 +466,76 @@ function RoomDetailPage() {
       console.log("Closing WS");
       socket.close();
     };
-  }, [id]);
+  }, [id, playerReady]);
+
+  // Load YouTube IFrame API and create player
+  useEffect(() => {
+    if (!videoId) return;
+
+    function createPlayer() {
+      if (!window.YT || !window.YT.Player) return;
+      if (playerRef.current) return;
+
+      playerRef.current = new window.YT.Player("cowatch-youtube-player", {
+        videoId,
+        playerVars: {
+          autoplay: 0,
+          controls: 1,
+          enablejsapi: 1,
+          origin: window.location.origin,
+        },
+        events: {
+          onReady: () => {
+            console.log("YT player ready");
+            setPlayerReady(true);
+          },
+        },
+      });
+    }
+
+    if (!window.YT || !window.YT.Player) {
+      const existingScript = document.querySelector(
+        'script[src="https://www.youtube.com/iframe_api"]'
+      );
+      if (!existingScript) {
+        const tag = document.createElement("script");
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.body.appendChild(tag);
+      }
+
+      window.onYouTubeIframeAPIReady = () => {
+        console.log("YT IFrame API ready");
+        createPlayer();
+      };
+    } else {
+      createPlayer();
+    }
+
+    return () => {
+      if (playerRef.current && playerRef.current.destroy) {
+        playerRef.current.destroy();
+        playerRef.current = null;
+        setPlayerReady(false);
+      }
+    };
+  }, [videoId]);
 
   const handleSaveUrl = async (e) => {
     e.preventDefault();
     if (!token || !room) return;
     setSaving(true);
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/auth/rooms/${id}/`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Token ${token}`,
-        },
-        body: JSON.stringify({ youtube_url: videoUrl }),
-      });
+      const res = await fetch(
+        `http://127.0.0.1:8000/api/auth/rooms/${id}/`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Token ${token}`,
+          },
+          body: JSON.stringify({ youtube_url: videoUrl }),
+        }
+      );
       if (res.ok) {
         const updatedRoom = await res.json();
         setRoom(updatedRoom);
@@ -466,7 +551,7 @@ function RoomDetailPage() {
     }
   };
 
-    const sendPlayback = (action, time = 0) => {
+  const sendPlayback = (action, time = 0) => {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
       console.log("WS not open, cannot send");
       return;
@@ -476,30 +561,40 @@ function RoomDetailPage() {
     socketRef.current.send(JSON.stringify(payload));
   };
 
-  if (loading) return <div className="text-center p-8">Loading room...</div>;
-  if (error && !room) return <div className="text-center p-8 text-red-400">{error}</div>;
-  if (!room) return <div className="text-center p-8">Room not found.</div>;
-
-  // Extract YouTube video ID from URL
-  const getVideoId = (url) => {
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-    const match = url.match(regExp);
-    return match && match[2].length === 11 ? match[2] : null;
-  };
-
-  const videoId = room.youtube_url ? getVideoId(room.youtube_url) : null;
+  // Early returns AFTER all hooks
+  if (loading)
+    return <div className="text-center p-8">Loading room...</div>;
+  if (error && !room)
+    return (
+      <div className="text-center p-8 text-red-400">
+        {error}
+      </div>
+    );
+  if (!room)
+    return <div className="text-center p-8">Room not found.</div>;
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
       <div className="bg-slate-900 p-6 rounded-xl">
         <h1 className="text-3xl font-bold mb-2">{room.name}</h1>
-        <p className="text-slate-400 mb-4">Invite code: <span className="font-mono bg-slate-800 px-2 py-1 rounded">{room.invite_code}</span></p>
+        <p className="text-slate-400 mb-4">
+          Invite code:{" "}
+          <span className="font-mono bg-slate-800 px-2 py-1 rounded">
+            {room.invite_code}
+          </span>
+        </p>
         <p className="text-sm text-slate-500">
-          Share link: <span className="font-mono break-all">{window.location.href}</span>
+          Share link:{" "}
+          <span className="font-mono break-all">
+            {window.location.href}
+          </span>
         </p>
       </div>
 
-      <form onSubmit={handleSaveUrl} className="bg-slate-900 p-6 rounded-xl space-y-4">
+      <form
+        onSubmit={handleSaveUrl}
+        className="bg-slate-900 p-6 rounded-xl space-y-4"
+      >
         <h2 className="text-xl font-semibold">Set YouTube Video</h2>
         <input
           type="url"
@@ -515,12 +610,26 @@ function RoomDetailPage() {
         >
           {saving ? "Saving..." : "Save Video URL"}
         </button>
-        {error && !saving && <p className={`p-3 rounded-lg ${error.includes("saved") ? "bg-green-900/50" : "bg-red-900/50"}`}>{error}</p>}
+        {error && !saving && (
+          <p
+            className={`p-3 rounded-lg ${
+              error.includes("saved")
+                ? "bg-green-900/50"
+                : "bg-red-900/50"
+            }`}
+          >
+            {error}
+          </p>
+        )}
       </form>
 
-            <div className="bg-slate-900 p-4 rounded-xl space-y-2">
+      <div className="bg-slate-900 p-4 rounded-xl space-y-2">
         <div className="text-sm text-slate-400">
-          WebSocket status: <span className="font-mono">{wsStatus}</span>
+          WebSocket status:{" "}
+          <span className="font-mono">{wsStatus}</span> | Player:{" "}
+          <span className="font-mono">
+            {playerReady ? "ready" : "not-ready"}
+          </span>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -547,34 +656,46 @@ function RoomDetailPage() {
         </div>
       </div>
 
-
       <div className="bg-slate-900 rounded-xl overflow-hidden">
         {videoId ? (
           <>
-            <iframe
-              src={`https://www.youtube.com/embed/${videoId}?autoplay=0`}
-              title="YouTube video player"
-              frameBorder="0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              referrerPolicy="strict-origin-when-cross-origin"
-              allowFullScreen
-              className="w-full h-96 md:h-[500px] object-cover"
+            <div
+              id="cowatch-youtube-player"
+              className="w-full h-96 md:h-[500px]"
             />
             <div className="px-6 pb-6 pt-3 text-sm text-slate-400">
-              Playback is local for now; sync will come later.
+              Playback is now controlled via WebSocket events
+              (PLAY/PAUSE/SEEK).
             </div>
           </>
-      ) : (
+        ) : (
           <div className="h-96 md:h-[500px] bg-slate-800 flex items-center justify-center">
             <div className="text-center text-slate-400">
               <div className="w-24 h-24 border-4 border-dashed border-slate-600 rounded-full mx-auto mb-4 flex items-center justify-center">
-                <svg className="w-12 h-12 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.665z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <svg
+                  className="w-12 h-12 text-slate-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.665z"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
                 </svg>
               </div>
               <p className="text-lg">No video selected</p>
-              <p className="text-sm">Paste a YouTube URL above and click Save</p>
+              <p className="text-sm">
+                Paste a YouTube URL above and click Save
+              </p>
             </div>
           </div>
         )}
