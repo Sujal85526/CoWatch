@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, useNavigate, useParams, Link } from "react-router-dom";
 import "./index.css";
@@ -370,6 +370,8 @@ function RoomDetailPage() {
   const [error, setError] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [saving, setSaving] = useState(false);
+  const [wsStatus, setWsStatus] = useState("disconnected");
+  const socketRef = useRef(null);
 
   useEffect(() => {
     const fetchRoom = async () => {
@@ -398,6 +400,44 @@ function RoomDetailPage() {
     fetchRoom();
   }, [id, token]);
 
+    useEffect(() => {
+    if (!id) return;
+
+    const wsUrl = `ws://${window.location.hostname}:8000/ws/rooms/${id}/`;
+    console.log("Connecting WebSocket to", wsUrl);
+    const socket = new WebSocket(wsUrl);
+    socketRef.current = socket;
+
+    socket.onopen = () => {
+      console.log("WS open");
+      setWsStatus("connected");
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log("WS message:", data);
+      } catch (e) {
+        console.log("WS raw message:", event.data);
+      }
+    };
+
+    socket.onclose = () => {
+      console.log("WS closed");
+      setWsStatus("disconnected");
+    };
+
+    socket.onerror = (err) => {
+      console.error("WS error", err);
+      setWsStatus("error");
+    };
+
+    return () => {
+      console.log("Closing WS");
+      socket.close();
+    };
+  }, [id]);
+
   const handleSaveUrl = async (e) => {
     e.preventDefault();
     if (!token || !room) return;
@@ -424,6 +464,16 @@ function RoomDetailPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+    const sendPlayback = (action, time = 0) => {
+    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      console.log("WS not open, cannot send");
+      return;
+    }
+    const payload = { type: "playback", action, time };
+    console.log("Sending playback", payload);
+    socketRef.current.send(JSON.stringify(payload));
   };
 
   if (loading) return <div className="text-center p-8">Loading room...</div>;
@@ -467,6 +517,36 @@ function RoomDetailPage() {
         </button>
         {error && !saving && <p className={`p-3 rounded-lg ${error.includes("saved") ? "bg-green-900/50" : "bg-red-900/50"}`}>{error}</p>}
       </form>
+
+            <div className="bg-slate-900 p-4 rounded-xl space-y-2">
+        <div className="text-sm text-slate-400">
+          WebSocket status: <span className="font-mono">{wsStatus}</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => sendPlayback("PLAY", 10)}
+            className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm"
+          >
+            Send PLAY
+          </button>
+          <button
+            type="button"
+            onClick={() => sendPlayback("PAUSE", 10)}
+            className="px-4 py-2 rounded bg-yellow-600 hover:bg-yellow-500 text-sm"
+          >
+            Send PAUSE
+          </button>
+          <button
+            type="button"
+            onClick={() => sendPlayback("SEEK", 42)}
+            className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm"
+          >
+            Send SEEK to 42s
+          </button>
+        </div>
+      </div>
+
 
       <div className="bg-slate-900 rounded-xl overflow-hidden">
         {videoId ? (
