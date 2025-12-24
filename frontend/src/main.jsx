@@ -74,7 +74,7 @@ function LoginPage() {
     e.preventDefault();
     setMessage("");
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/auth/login/", {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/login/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -134,7 +134,7 @@ function RegisterPage() {
     e.preventDefault();
     setMessage("");
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/auth/register/", {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/register/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -209,7 +209,7 @@ function RoomsPage() {
         return;
       }
       try {
-        const res = await fetch("http://127.0.0.1:8000/api/auth/rooms/", {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/rooms/`, {
           headers: {
             Authorization: `Token ${token}`,
           },
@@ -233,7 +233,7 @@ function RoomsPage() {
       e.preventDefault();
       setMessage("");
       try {
-        const res = await fetch("http://127.0.0.1:8000/api/auth/rooms/", {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/rooms/`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -313,7 +313,7 @@ function RoomsPage() {
                   return;
                 }
                 try {
-                  const res = await fetch("http://127.0.0.1:8000/api/auth/rooms/join/", {
+                  const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/rooms/join/`, {
                     method: "POST",
                     headers: {
                       "Content-Type": "application/json",
@@ -397,7 +397,7 @@ function RoomDetailPage() {
       }
       try {
         const res = await fetch(
-          `http://127.0.0.1:8000/api/auth/rooms/${id}/`,
+          `${import.meta.env.VITE_API_URL}/api/auth/rooms/${id}/`,
           {
             headers: { Authorization: `Token ${token}` },
           }
@@ -548,7 +548,7 @@ function RoomDetailPage() {
     setSaving(true);
     try {
       const res = await fetch(
-        `http://127.0.0.1:8000/api/auth/rooms/${id}/`,
+        `${import.meta.env.VITE_API_URL}/api/auth/rooms/${id}/`,
         {
           method: "PATCH",
           headers: {
