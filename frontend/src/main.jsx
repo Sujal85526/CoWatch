@@ -381,10 +381,11 @@ function RoomDetailPage() {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [localSender, setLocalSender] = useState(
-  () => localStorage.getItem("username") || "Guest"
-);
+    () => localStorage.getItem("username") || "Guest"
+  );
+  const [showChat, setShowChat] = useState(true);
 
-console.log("initial localSender:", localSender);
+  console.log("initial localSender:", localSender);
 
   // Fetch room data
   useEffect(() => {
@@ -405,8 +406,6 @@ console.log("initial localSender:", localSender);
           const data = await res.json();
           setRoom(data);
           setVideoUrl(data.youtube_url || "");
-          // setLocalSender(data.owner_username || 'You');
-          // console.log("localSender set to:", data.owner_username || "You");
         } else {
           setError("Room not found or you are not the owner.");
         }
@@ -444,26 +443,26 @@ console.log("initial localSender:", localSender);
     };
 
     socket.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      console.log("WS message:", data);
+      try {
+        const data = JSON.parse(event.data);
+        console.log("WS message:", data);
 
-      if (data.type === "playback" && playerRef.current && playerReady) {
-        if (data.action === "PLAY") {
-          playerRef.current.playVideo();
-        } else if (data.action === "PAUSE") {
-          playerRef.current.pauseVideo();
-        } else if (data.action === "SEEK") {
-          const t = typeof data.time === "number" ? data.time : 0;
-          playerRef.current.seekTo(t, true);
+        if (data.type === "playback" && playerRef.current && playerReady) {
+          if (data.action === "PLAY") {
+            playerRef.current.playVideo();
+          } else if (data.action === "PAUSE") {
+            playerRef.current.pauseVideo();
+          } else if (data.action === "SEEK") {
+            const t = typeof data.time === "number" ? data.time : 0;
+            playerRef.current.seekTo(t, true);
+          }
+        } else if (data.type === "chat") {
+          setChatMessages((prev) => [...prev, data]);
         }
-      } else if (data.type === "chat") {
-        setChatMessages((prev) => [...prev, data]);
+      } catch (e) {
+        console.log("WS raw message:", event.data);
       }
-    } catch (e) {
-      console.log("WS raw message:", event.data);
-    }
-  };
+    };
 
     socket.onclose = () => {
       console.log("WS closed");
@@ -501,6 +500,16 @@ console.log("initial localSender:", localSender);
           onReady: () => {
             console.log("YT player ready");
             setPlayerReady(true);
+          },
+          onStateChange: (e) => {
+            if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
+            const currentTime = e.target.getCurrentTime();
+
+            if (e.data === window.YT.PlayerState.PLAYING) {
+              sendPlayback("PLAY", currentTime);
+            } else if (e.data === window.YT.PlayerState.PAUSED) {
+              sendPlayback("PAUSE", currentTime);
+            }
           },
         },
       });
@@ -579,14 +588,13 @@ console.log("initial localSender:", localSender);
       console.log("WS not open, cannot send chat");
       return;
     }
-  const trimmed = chatInput.trim();
+    const trimmed = chatInput.trim();
     if (!trimmed) return;
     console.log("sending as:", localSender);
 
     const payload = {
       type: "chat",
       text: trimmed,
-      // later: real username from auth context
       sender: localSender,
     };
     socketRef.current.send(JSON.stringify(payload));
@@ -606,23 +614,27 @@ console.log("initial localSender:", localSender);
     return <div className="text-center p-8">Room not found.</div>;
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-6">
+    <div className="max-w-6xl mx-auto p-6 space-y-6">
+      {/* Room Header - REMOVED toggle button */}
       <div className="bg-slate-900 p-6 rounded-xl">
-        <h1 className="text-3xl font-bold mb-2">{room.name}</h1>
-        <p className="text-slate-400 mb-4">
-          Invite code:{" "}
-          <span className="font-mono bg-slate-800 px-2 py-1 rounded">
-            {room.invite_code}
-          </span>
-        </p>
-        <p className="text-sm text-slate-500">
-          Share link:{" "}
-          <span className="font-mono break-all">
-            {window.location.href}
-          </span>
-        </p>
+        <div>
+          <h1 className="text-3xl font-bold mb-2">{room.name}</h1>
+          <p className="text-slate-400 mb-4">
+            Invite code:{" "}
+            <span className="font-mono bg-slate-800 px-2 py-1 rounded">
+              {room.invite_code}
+            </span>
+          </p>
+          <p className="text-sm text-slate-500">
+            Share link:{" "}
+            <span className="font-mono break-all">
+              {window.location.href}
+            </span>
+          </p>
+        </div>
       </div>
 
+      {/* YouTube URL Form */}
       <form
         onSubmit={handleSaveUrl}
         className="bg-slate-900 p-6 rounded-xl space-y-4"
@@ -646,8 +658,8 @@ console.log("initial localSender:", localSender);
           <p
             className={`p-3 rounded-lg ${
               error.includes("saved")
-                ? "bg-green-900/50"
-                : "bg-red-900/50"
+                ? "bg-green-900/50 border border-green-500"
+                : "bg-red-900/50 border border-red-500"
             }`}
           >
             {error}
@@ -655,13 +667,38 @@ console.log("initial localSender:", localSender);
         )}
       </form>
 
+      {/* WebSocket Controls + Toggle Button (Opposite Corner) */}
       <div className="bg-slate-900 p-4 rounded-xl space-y-2">
-        <div className="text-sm text-slate-400">
-          WebSocket status:{" "}
-          <span className="font-mono">{wsStatus}</span> | Player:{" "}
-          <span className="font-mono">
-            {playerReady ? "ready" : "not-ready"}
-          </span>
+        <div className="flex justify-between items-center mb-2">
+          <div className="text-sm text-slate-400">
+            WebSocket status:{" "}
+            <span className="font-mono">{wsStatus}</span> | Player:{" "}
+            <span className="font-mono">
+              {playerReady ? "ready" : "not-ready"}
+            </span>
+          </div>
+          {/* Toggle Button - OPPOSITE CORNER */}
+          <button
+            onClick={() => setShowChat(!showChat)}
+            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-md text-xs font-medium flex items-center gap-1 transition-colors shadow-sm"
+            title="Toggle chat panel"
+          >
+            {showChat ? (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Hide
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                </svg>
+                Chat
+              </>
+            )}
+          </button>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -688,101 +725,103 @@ console.log("initial localSender:", localSender);
         </div>
       </div>
 
-      <div className="bg-slate-900 p-4 rounded-xl space-y-3">
-        <h2 className="text-lg font-semibold">Chat</h2>
-          <div className="h-40 overflow-y-auto bg-slate-800 rounded p-2 text-sm space-y-1">
-  {chatMessages.map((m, idx) => {
-  const fromMe = m.sender === localSender;
-
-  return (
-    <div
-      key={idx}
-      className={`flex ${fromMe ? "justify-end" : "justify-start"}`}
-    >
-      <div
-        className={`max-w-[75%] px-2 py-1 rounded ${
-          fromMe ? "bg-indigo-600 text-white" : "bg-slate-700 text-slate-100"
-        }`}
-      >
-        <div className="text-[10px] text-slate-300 mb-0.5">
-          {m.sender || "Guest"}
-        </div>
-        <div>{m.text}</div>
-      </div>
-    </div>
-  );
-})}
-
-  {chatMessages.length === 0 && (
-    <div className="text-slate-500 text-sm">No messages yet.</div>
-  )}
-</div>
-
-          <div className="flex gap-2">
-           <input
-              type="text"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  sendChat();
-              }
-            }}
-      placeholder="Type a message..."
-  className="flex-1 px-3 py-2 rounded bg-slate-800 border border-slate-700 outline-none text-sm"
-/>
-
-        <button
-          type="button"
-          onClick={sendChat}
-          className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm"
-        >
-          Send
-        </button>
-      </div>
-    </div>
-
-      <div className="bg-slate-900 rounded-xl overflow-hidden">
-        {videoId ? (
-          <>
-            <div
-              id="cowatch-youtube-player"
-              className="w-full h-96 md:h-[500px]"
-            />
-            <div className="px-6 pb-6 pt-3 text-sm text-slate-400">
-              Playback is now controlled via WebSocket events
-              (PLAY/PAUSE/SEEK).
-            </div>
-          </>
-        ) : (
-          <div className="h-96 md:h-[500px] bg-slate-800 flex items-center justify-center">
-            <div className="text-center text-slate-400">
-              <div className="w-24 h-24 border-4 border-dashed border-slate-600 rounded-full mx-auto mb-4 flex items-center justify-center">
-                <svg
-                  className="w-12 h-12 text-slate-500"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.665z"
-                  />
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
+      {/* Video + Chat Side-by-Side Layout - UNCHANGED */}
+      <div className="flex flex-col lg:flex-row gap-6 space-y-6 lg:space-y-0">
+        {/* LEFT: Video Player */}
+        <div className="flex-1 bg-slate-900 rounded-xl overflow-hidden">
+          {videoId ? (
+            <>
+              <div
+                id="cowatch-youtube-player"
+                className="w-full aspect-video"
+              />
+              <div className="px-6 pb-6 pt-3 text-sm text-slate-400">
+                Playback controlled via WebSocket (PLAY/PAUSE/SEEK)
               </div>
-              <p className="text-lg">No video selected</p>
-              <p className="text-sm">
-                Paste a YouTube URL above and click Save
-              </p>
+            </>
+          ) : (
+            <div className="aspect-video bg-slate-800 flex items-center justify-center">
+              <div className="text-center text-slate-400 p-8">
+                <div className="w-24 h-24 border-4 border-dashed border-slate-600 rounded-full mx-auto mb-4 flex items-center justify-center">
+                  <svg
+                    className="w-12 h-12 text-slate-500"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.665z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                </div>
+                <p className="text-lg">No video selected</p>
+                <p className="text-sm">
+                  Paste a YouTube URL above and click Save
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT: Chat Panel (Toggleable) */}
+        {showChat && (
+          <div className="lg:w-80 bg-slate-900 rounded-xl p-4 space-y-3 flex flex-col h-[500px]">
+            <h2 className="text-lg font-semibold text-slate-100">Chat</h2>
+            <div className="flex-1 overflow-y-auto space-y-2 pr-2 scrollbar-thin scrollbar-thumb-slate-600">
+              {chatMessages.map((m, idx) => {
+                const fromMe = m.sender === localSender;
+                return (
+                  <div key={idx} className={`flex ${fromMe ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[75%] px-3 py-2 rounded-lg ${
+                      fromMe ? "bg-indigo-600 text-white" : "bg-slate-700 text-slate-100"
+                    }`}>
+                      <div className="text-xs text-slate-300 mb-1">
+                        {m.sender || "Guest"}
+                      </div>
+                      <div>{m.text}</div>
+                    </div>
+                  </div>
+                );
+              })}
+              {chatMessages.length === 0 && (
+                <div className="text-slate-500 text-sm text-center py-8">
+                  No messages yet. Start the conversation!
+                </div>
+              )}
+            </div>
+            <div className="border-t border-slate-700 pt-3">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      sendChat();
+                    }
+                  }}
+                  placeholder="Type a message..."
+                  className="flex-1 px-3 py-2 rounded bg-slate-800 border border-slate-700 outline-none text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                />
+                <button
+                  type="button"
+                  onClick={sendChat}
+                  disabled={!chatInput.trim()}
+                  className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-sm font-medium transition-colors"
+                >
+                  Send
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -790,6 +829,8 @@ console.log("initial localSender:", localSender);
     </div>
   );
 }
+
+
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
