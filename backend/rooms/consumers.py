@@ -15,21 +15,29 @@ class RoomConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def receive(self, text_data):
-        try:
-            data = json.loads(text_data)
-        except json.JSONDecodeError:
-            return
+        data = json.loads(text_data)
+        msg_type = data.get("type")
 
-        # Example expected shape:
-        # { "type": "playback", "action": "PLAY", "time": 120.5 }
-        await self.channel_layer.group_send(
-            self.group_name,
-            {
-                "type": "room_message",
-                "payload": data,
-            },
-        )
+        if msg_type == "playback":
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    "type": "playback_event",
+                    "payload": data,
+                },
+            )
+        elif msg_type == "chat":
+            await self.channel_layer.group_send(
+                self.group_name,
+                {
+                    "type": "chat_message",
+                    "payload": data,
+                },
+            )
 
-    async def room_message(self, event):
-        # Send to WebSocket
+    async def playback_event(self, event):
         await self.send(text_data=json.dumps(event["payload"]))
+
+    async def chat_message(self, event):
+        await self.send(text_data=json.dumps(event["payload"]))
+

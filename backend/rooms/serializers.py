@@ -30,7 +30,17 @@ class LoginSerializer(serializers.Serializer):
         return {'user': user}
 
 class RoomSerializer(serializers.ModelSerializer):
+    owner_username = serializers.CharField(source='owner.username', read_only=True)
+
     class Meta:
         model = Room
-        fields = ('id', 'name', 'youtube_url', 'is_public', 'invite_code', 'created_at')
-        read_only_fields = ('id', 'invite_code', 'created_at')
+        fields = (
+            'id',
+            'name',
+            'youtube_url',
+            'is_public',
+            'invite_code',
+            'created_at',
+            'owner_username',
+        )
+        read_only_fields = ('id', 'invite_code', 'created_at', 'owner_username')

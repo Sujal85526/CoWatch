@@ -82,6 +82,7 @@ function LoginPage() {
       const data = await res.json();
       if (res.ok && data.token) {
         login(data.token);
+        localStorage.setItem("username", data.user.username);
         navigate("/rooms");
       } else {
         setMessage("Invalid username or password");
@@ -377,6 +378,14 @@ function RoomDetailPage() {
   const playerRef = useRef(null);
   const [playerReady, setPlayerReady] = useState(false);
 
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [localSender, setLocalSender] = useState(
+  () => localStorage.getItem("username") || "Guest"
+);
+
+console.log("initial localSender:", localSender);
+
   // Fetch room data
   useEffect(() => {
     const fetchRoom = async () => {
@@ -396,6 +405,8 @@ function RoomDetailPage() {
           const data = await res.json();
           setRoom(data);
           setVideoUrl(data.youtube_url || "");
+          // setLocalSender(data.owner_username || 'You');
+          // console.log("localSender set to:", data.owner_username || "You");
         } else {
           setError("Room not found or you are not the owner.");
         }
@@ -433,24 +444,26 @@ function RoomDetailPage() {
     };
 
     socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log("WS message:", data);
+    try {
+      const data = JSON.parse(event.data);
+      console.log("WS message:", data);
 
-        if (data.type === "playback" && playerRef.current && playerReady) {
-          if (data.action === "PLAY") {
-            playerRef.current.playVideo();
-          } else if (data.action === "PAUSE") {
-            playerRef.current.pauseVideo();
-          } else if (data.action === "SEEK") {
-            const t = typeof data.time === "number" ? data.time : 0;
-            playerRef.current.seekTo(t, true);
-          }
+      if (data.type === "playback" && playerRef.current && playerReady) {
+        if (data.action === "PLAY") {
+          playerRef.current.playVideo();
+        } else if (data.action === "PAUSE") {
+          playerRef.current.pauseVideo();
+        } else if (data.action === "SEEK") {
+          const t = typeof data.time === "number" ? data.time : 0;
+          playerRef.current.seekTo(t, true);
         }
-      } catch (e) {
-        console.log("WS raw message:", event.data);
+      } else if (data.type === "chat") {
+        setChatMessages((prev) => [...prev, data]);
       }
-    };
+    } catch (e) {
+      console.log("WS raw message:", event.data);
+    }
+  };
 
     socket.onclose = () => {
       console.log("WS closed");
@@ -561,6 +574,25 @@ function RoomDetailPage() {
     socketRef.current.send(JSON.stringify(payload));
   };
 
+  const sendChat = () => {
+    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      console.log("WS not open, cannot send chat");
+      return;
+    }
+  const trimmed = chatInput.trim();
+    if (!trimmed) return;
+    console.log("sending as:", localSender);
+
+    const payload = {
+      type: "chat",
+      text: trimmed,
+      // later: real username from auth context
+      sender: localSender,
+    };
+    socketRef.current.send(JSON.stringify(payload));
+    setChatInput("");
+  };
+
   // Early returns AFTER all hooks
   if (loading)
     return <div className="text-center p-8">Loading room...</div>;
@@ -655,6 +687,61 @@ function RoomDetailPage() {
           </button>
         </div>
       </div>
+
+      <div className="bg-slate-900 p-4 rounded-xl space-y-3">
+        <h2 className="text-lg font-semibold">Chat</h2>
+          <div className="h-40 overflow-y-auto bg-slate-800 rounded p-2 text-sm space-y-1">
+  {chatMessages.map((m, idx) => {
+  const fromMe = m.sender === localSender;
+
+  return (
+    <div
+      key={idx}
+      className={`flex ${fromMe ? "justify-end" : "justify-start"}`}
+    >
+      <div
+        className={`max-w-[75%] px-2 py-1 rounded ${
+          fromMe ? "bg-indigo-600 text-white" : "bg-slate-700 text-slate-100"
+        }`}
+      >
+        <div className="text-[10px] text-slate-300 mb-0.5">
+          {m.sender || "Guest"}
+        </div>
+        <div>{m.text}</div>
+      </div>
+    </div>
+  );
+})}
+
+  {chatMessages.length === 0 && (
+    <div className="text-slate-500 text-sm">No messages yet.</div>
+  )}
+</div>
+
+          <div className="flex gap-2">
+           <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  sendChat();
+              }
+            }}
+      placeholder="Type a message..."
+  className="flex-1 px-3 py-2 rounded bg-slate-800 border border-slate-700 outline-none text-sm"
+/>
+
+        <button
+          type="button"
+          onClick={sendChat}
+          className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm"
+        >
+          Send
+        </button>
+      </div>
+    </div>
 
       <div className="bg-slate-900 rounded-xl overflow-hidden">
         {videoId ? (
