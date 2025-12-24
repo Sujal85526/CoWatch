@@ -1,0 +1,1 @@
+web: gunicorn cowatch_backend.wsgi:application
