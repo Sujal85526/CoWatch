@@ -432,7 +432,7 @@ function RoomDetailPage() {
   useEffect(() => {
     if (!id) return;
 
-    const wsUrl = `ws://${window.location.hostname}:8000/ws/rooms/${id}/`;
+    const wsUrl = `${import.meta.env.VITE_WS_URL}/rooms/${id}/`;
     console.log("Connecting WebSocket to", wsUrl);
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
